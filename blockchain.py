@@ -1,32 +1,66 @@
-from flask import Flask, request, jsonify
-import simplejson
+# Hosting stuff
+from flask import Flask, request
 from flask_restful import Resource, Api
-import hashlib, binascii
+# Serializing our objects then hashing them
+import hashlib
 import pickle
-from datetime import datetime
+from collections import namedtuple
+#Mainly for pretty printing
+from collections import OrderedDict
+import operator
+import pprint
+# Generate a uuid
 from uuid1 import uuid1
+# Making http requests and parsing
+import requests
+import simplejson
+# Getting port number from commandline
+import sys
+# Scheduling consensus to run every 10 seconds
+import atexit
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.interval import IntervalTrigger
+
+transaction = namedtuple('transaction',['From','To','Amount'])
+CONSENSUS_FREQ_IN_SECONDS = 30
+HASH_DIFFICULTY = (2**256)/100
 
 class Block(object):
-    def __init__(self, data, prev_hash, index=0):
+    def __init__(self, data, prev_hash, index=0, hash=None, nonce=None):
         self.index = index
         self.data = data
         self.prev_hash = prev_hash
-        self.nounce = 100
-        self.hash = self.__hash__()
-
-    # (self.index, self.timestamp, self.data, self.prev_hash, self.nounce)
+        if nonce == None:
+            self.nonce = self.set_nonce()
+        else:
+            self.nonce = nonce
+        if hash == None:
+            self.hash = self.__hash__()
+        else:
+            self.hash = hash
 
     def set_hash(self):
         self.hash = self.__hash__()
         return self
 
     def validate(self):
-        return self.hash == self.__hash__()
+        return self.hash == self.__hash__() and self.hash < HASH_DIFFICULTY
+
+    def set_nonce(self):
+        for i in range(2**256):
+            self.nonce = i
+            self.set_hash()
+            if self.validate():
+                print("We used ",i, " attempts before succeeding in setting the nonce.")
+                break
 
     def __hash__(self):
-        hashId = hashlib.md5()
-        hashId.update(pickle.dumps((self.index, self.data, self.prev_hash, self.nounce)))
-        return int(hashId.hexdigest()[-2:],16)
+        hashId = hashlib.sha256()
+        hashId.update(pickle.dumps((self.index, self.data, self.prev_hash, self.nonce)))
+        return int(hashId.hexdigest(),16)
+
+    def __repr__(self):
+        return str(OrderedDict(sorted(self.__dict__.items(), key=operator.itemgetter(0), reverse=True)))
 
     def _asdict(self):
         return self.__dict__
@@ -35,64 +69,98 @@ class Blockchain(object):
     def __init__(self):
         self.genesis_block = Block(data=[], prev_hash=None, index=0)
         self.genesis_block.set_hash()
+        self.genesis_block.set_nonce()
         self.chain = [self.genesis_block]
         self.transactions = []
+        self.nodes = set()
 
     def get_latest(self):
         return self.chain[-1]
 
     def add_block(self, new_block):
-        print(self.get_latest().hash)
-        print(new_block.prev_hash)
         if new_block.prev_hash == self.get_latest().hash and new_block.validate():
             self.chain.append(new_block)
         else:
             raise Exception("This hash is wrong!")
 
     def transactions_to_block(self):
-        curr_block = Block(data = self.transactions,
+        curr_block = Block(data = self.transactions[:],
                            prev_hash = self.get_latest().hash,
                            index = self.get_latest().index + 1)
-        for i in range(1000):
-            curr_block.hash = i
-            if curr_block.validate():
-                print(curr_block.hash)
-                break
+        curr_block.set_nonce()
+        self.transactions = []
         self.add_block(curr_block)
 
     def validate(self):
         bools = [x.validate() for i,x in enumerate(self.chain)]
         return False not in bools
 
+    @staticmethod
+    def validate_list_of_blocks(list_of_blocks_in_dict_form):
+        chain = []
+        for block_dict in list_of_blocks_in_dict_form:
+            txn_list = []
+            for txn in block_dict["data"]:
+                txn_list.append(transaction(From=txn["From"],To=txn["To"],Amount=txn["Amount"]))
+            chain.append(
+                Block(
+                  index=block_dict["index"],
+                  data=txn_list,
+                  prev_hash=block_dict["prev_hash"],
+                  nonce=int(block_dict["nonce"]),
+                  hash=block_dict["hash"]
+                  )
+            )
+        bools = [x.validate() for x in chain]
+        return chain, False not in bools
+
     def add_transaction(self, src, dst, amount):
-        self.transactions.append({
-            "From":src,
-            "To":dst,
-            "Amount":amount
-        })
+        self.transactions.append(transaction(From=src,To=dst,Amount=amount))
+        return self.transactions
 
+    def register(self, node_name):
+        self.nodes.add(node_name)
 
-# x = Block(1, [1,2,3], None)
-# chain = Blockchain()
-# chain.add_block(x)
-# chain.validate()
-
-app = Flask(__name__)
-api = Api(app)
+    def consensus(self):
+        print("Consensus begins! Attempting to connect to: ", list(self.nodes))
+        print("Current chain")
+        pprint.pprint(self.chain)
+        longest_known_length = len(self.chain)
+        replacement_chain = None
+        replacement_node = None
+        for nbr in self.nodes:
+            try:
+                r = requests.get("http://" + nbr + "/chain")
+                nbr_chain_in_dict_form = simplejson.loads(r.json())["chain"]
+                list_of_blocks, valid = Blockchain.validate_list_of_blocks(nbr_chain_in_dict_form)
+                if valid and len(list_of_blocks) > longest_known_length:
+                    replacement_node = nbr
+                    longest_known_length = len(list_of_blocks)
+                    replacement_chain = list_of_blocks
+            except requests.exceptions.ConnectionError:
+                print("Failed connecting to", nbr)
+                pass
+        if longest_known_length > len(self.chain):
+            print("Switching to chain from ", replacement_node)
+            print("This is the new chain!")
+            pprint.pprint(replacement_chain)
+            self.chain = replacement_chain
+        print("Consensus ends!")
 
 node_identifier = str(uuid1()).replace("-","-")
 blockchain = Blockchain()
 
 class mine(Resource):
     def get(self):
+        blockchain.add_transaction("0",node_identifier,1)
         blockchain.transactions_to_block()
-        return {'mined': 'new block'}
+        return simplejson.dumps({"Block added": blockchain.get_latest()})
 
 class new_transaction(Resource):
     def post(self):
         transaction_dict = request.get_json()
-        blockchain.add_transaction(transaction_dict)
-        return "Transaction added"
+        curr_transactions = blockchain.add_transaction(transaction_dict["From"], transaction_dict["To"], transaction_dict["Amount"])
+        return simplejson.dumps({"Current transactions: ": tuple(curr_transactions)})
 
 class chain(Resource):
     def get(self):
@@ -102,10 +170,35 @@ class chain(Resource):
         }
         return simplejson.dumps(response), 200
 
+class register(Resource):
+    def post(self):
+        registration_dict = request.get_json()
+        blockchain.register(registration_dict["node_host"])
+        return registration_dict["node_host"]
 
-api.add_resource(mine, '/mine')
-api.add_resource(new_transaction, '/transactions/new')
-api.add_resource(chain, '/chain')
+def main():
+    print(sys.argv)
+    if len(sys.argv) < 2 or type(int(sys.argv[1])) != type(int(0)):
+        print("Please enter exactly one port number!")
+        return
+    chosen_port = int(sys.argv[1])
+    app = Flask(__name__)
+    api = Api(app)
+    api.add_resource(mine, '/mine')
+    api.add_resource(new_transaction, '/transactions/new')
+    api.add_resource(chain, '/chain')
+    api.add_resource(register, '/register')
+    scheduler = BackgroundScheduler()
+    scheduler.start()
+    scheduler.add_job(
+        func=blockchain.consensus,
+        trigger=IntervalTrigger(seconds=CONSENSUS_FREQ_IN_SECONDS),
+        id='Achieving consensus with known nodes',
+        name='Consensusing',
+        replace_existing=True)
+    # Shut down the scheduler when exiting the app
+    atexit.register(lambda: scheduler.shutdown())
+    app.run(host='localhost', port=chosen_port)
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+    main()
