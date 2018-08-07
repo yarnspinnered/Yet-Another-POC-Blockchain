@@ -55,8 +55,8 @@ To register other nodes in the network, a POST request with the host of the regi
 
 After POSTing a transaction from fooman to barman and mining one block at the node using port 5000.
 
-<a href="url"><img src="https://github.com/yarnspinnered/Yet-Another-POC-Blockchain/blob/master/Initial.png" width="800" ></a>
+<a href="url"><img src="https://github.com/yarnspinnered/Yet-Another-POC-Blockchain/blob/master/Initial.png" height="400" width="900" ></a>
 
 The second node at port 5001 which only has a genesis block but registers the first node at 5001 going through the consensus protocol.
 
-<a href="url"><img src="https://github.com/yarnspinnered/Yet-Another-POC-Blockchain/blob/master/switching-chains.png" width="800" ></a>
+<a href="url"><img src="https://github.com/yarnspinnered/Yet-Another-POC-Blockchain/blob/master/switching-chains.png" height="400" width="900" ></a>
