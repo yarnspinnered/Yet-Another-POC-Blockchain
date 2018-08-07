@@ -51,12 +51,33 @@ To get the current chain, either as a user or another blockchain node, a GET req
 To add transactions to the set of transactions the blockchain will be adding next, a POST request is sent to the "/transactions/new" endpoint.
 To register other nodes in the network, a POST request with the host of the registrant node is sent to the node that doesn't know about it yet.
 
-# Screenshots of it in action
+# Log of it in action
 
 After POSTing a transaction from fooman to barman and mining one block at the node using port 5000.
 
-<a href="url"><img src="https://github.com/yarnspinnered/Yet-Another-POC-Blockchain/blob/master/Initial.png" height="200" width="900" ></a>
+````
+127.0.0.1 - - [07/Aug/2018 21:42:45] "POST /transactions/new HTTP/1.1" 200 -
+We used  52  attempts before succeeding in setting the nonce.
+We used  52  attempts before succeeding in setting the nonce.
+127.0.0.1 - - [07/Aug/2018 21:42:46] "GET /mine HTTP/1.1" 200 -
+127.0.0.1 - - [07/Aug/2018 21:42:46] "GET /chain HTTP/1.1" 200 -
+Consensus begins! Attempting to connect to:  []
+Current chain
+[OrderedDict([('prev_hash', None), ('nonce', 53), ('index', 0), ('hash', 1020927793593912140819426550356994498379306788437712821133320908185758475865), ('data', [])]),
+ OrderedDict([('prev_hash', 1020927793593912140819426550356994498379306788437712821133320908185758475865), ('nonce', 52), ('index', 1), ('hash', 825007783000051959672595478140960382480379273434266641137213138993897408836), ('data', [transaction(From='fooman', To='barman', Amount=123), transaction(From='0', To='00367c75-acda-2c61-9183-379f50ca802b', Amount=1)])])]
+Consensus ends!
 
+````
 The second node at port 5001 which only has a genesis block but registers the first node at 5001 going through the consensus protocol.
 
-<a href="url"><img src="https://github.com/yarnspinnered/Yet-Another-POC-Blockchain/blob/master/switching-chains.png" height="200" width="900" ></a>
+````
+127.0.0.1 - - [07/Aug/2018 21:42:21] "POST /register HTTP/1.1" 200 -
+Consensus begins! Attempting to connect to:  ['127.0.0.1:5000']
+Current chain
+[OrderedDict([('prev_hash', None), ('nonce', 53), ('index', 0), ('hash', 1020927793593912140819426550356994498379306788437712821133320908185758475865), ('data', [])])]
+Switching to chain from  127.0.0.1:5000
+This is the new chain!
+[OrderedDict([('prev_hash', None), ('nonce', 53), ('index', 0), ('hash', 1020927793593912140819426550356994498379306788437712821133320908185758475865), ('data', [])]),
+ OrderedDict([('prev_hash', 1020927793593912140819426550356994498379306788437712821133320908185758475865), ('nonce', 52), ('index', 1), ('hash', 825007783000051959672595478140960382480379273434266641137213138993897408836), ('data', [transaction(From='fooman', To='barman', Amount=123), transaction(From='0', To='00367c75-acda-2c61-9183-379f50ca802b', Amount=1)])])]
+Consensus ends!
+````
